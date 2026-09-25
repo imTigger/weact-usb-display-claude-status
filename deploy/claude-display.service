@@ -1,0 +1,11 @@
+[Unit]
+Description=Claude Code status on the WeAct Display FS 0.96" screen
+Documentation=file://%h/WebstormProjects/qinheng-display/README.md
+
+[Service]
+ExecStart=%h/.local/bin/claude-display
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

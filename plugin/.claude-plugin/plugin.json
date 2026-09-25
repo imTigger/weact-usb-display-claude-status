@@ -1,0 +1,8 @@
+{
+  "name": "claude-display",
+  "version": "0.1.0",
+  "description": "Show Claude Code session status on a WeAct Display FS 0.96\" USB screen",
+  "author": {
+    "name": "Tiger Fok"
+  }
+}
