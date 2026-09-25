@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"log"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,13 +28,50 @@ const (
 // Display owns the device: it reconnects whenever the panel goes away, sends
 // only the pixels that changed, and always shows the most recent frame.
 type Display struct {
-	path   string
-	orient byte
-	frames chan Frame
+	path      string
+	orients   *Orientations
+	frames    chan Frame
+	flips     chan chan flipReply
+	connected atomic.Bool
 }
 
-func NewDisplay(path string, orient byte) *Display {
-	return &Display{path: path, orient: orient, frames: make(chan Frame, 1)}
+func NewDisplay(path string, orients *Orientations) *Display {
+	return &Display{path: path, orients: orients, frames: make(chan Frame, 1), flips: make(chan chan flipReply)}
+}
+
+// FlipResult reports a 180° turn: the port the panel is on and the
+// orientation now saved for it.
+type FlipResult struct {
+	Port        string `json:"port"`
+	Orientation byte   `json:"orientation"`
+	SaveError   string `json:"save_error,omitempty"` // turned, but won't be remembered
+}
+
+type flipReply struct {
+	res FlipResult
+	err error
+}
+
+var errNotConnected = errors.New("display not connected")
+
+// Flip turns the panel 180° and remembers that for the USB port it's on. It
+// returns an error only when the panel wasn't turned.
+func (d *Display) Flip() (FlipResult, error) {
+	if !d.connected.Load() {
+		return FlipResult{}, errNotConnected
+	}
+	reply := make(chan flipReply, 1)
+	select {
+	case d.flips <- reply:
+	case <-time.After(3 * time.Second):
+		return FlipResult{}, errNotConnected
+	}
+	select {
+	case r := <-reply:
+		return r.res, r.err
+	case <-time.After(5 * time.Second):
+		return FlipResult{}, errors.New("display did not answer")
+	}
 }
 
 // Show queues f, replacing any frame that hasn't been sent yet.
@@ -100,10 +139,17 @@ func (d *Display) session(ctx context.Context, latest *Frame) (connected bool, e
 	if err != nil {
 		standalone = 25 // factory default
 	}
-	if err := dev.SetOrientation(d.orient); err != nil {
+	port, err := usbPort(d.path, "/sys/class/tty")
+	if err != nil {
+		log.Printf("display: can't tell which USB port it's on: %v", err)
+	}
+	orient := d.orients.For(port)
+	if err := dev.SetOrientation(orient); err != nil {
 		return false, err
 	}
-	log.Printf("display: connected to %s %s on %s", who, version, d.path)
+	log.Printf("display: connected to %s %s on %s, USB port %s, orientation %d", who, version, d.path, port, orient)
+	d.connected.Store(true)
+	defer d.connected.Store(false)
 
 	p := painter{dev: dev, brightness: -1}
 	if latest.Img != nil {
@@ -128,6 +174,25 @@ func (d *Display) session(ctx context.Context, latest *Frame) (connected bool, e
 		case <-tick.C:
 			if err := p.breathe(); err != nil {
 				return true, err
+			}
+		case reply := <-d.flips:
+			o := flipped(orient)
+			if err := dev.SetOrientation(o); err != nil {
+				reply <- flipReply{err: err}
+				return true, err
+			}
+			orient = o
+			res := FlipResult{Port: port, Orientation: o}
+			if err := d.orients.Set(port, o); err != nil {
+				log.Printf("orientation: can't save: %v", err)
+				res.SaveError = err.Error()
+			}
+			reply <- flipReply{res: res}
+			p.shown = nil // the old picture is upside down now: repaint all of it
+			if latest.Img != nil {
+				if err := p.paint(*latest); err != nil {
+					return true, err
+				}
 			}
 		}
 	}

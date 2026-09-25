@@ -9,18 +9,15 @@ import (
 	"time"
 )
 
-// NewServer takes Claude Code HTTP hooks on POST /event and serves a debug
-// dump on GET /state.
+// NewServer takes Claude Code HTTP hooks on POST /event, turns the panel on
+// POST /flip, and serves a debug dump on GET /state.
 //
 // Every /event answer is 200 with an empty body, which hooks treat as "no
 // decision": this server must never approve or deny a PermissionRequest.
-func NewServer(t *Tracker) http.Handler {
+func NewServer(t *Tracker, d *Display) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /event", func(w http.ResponseWriter, r *http.Request) {
-		// Browsers can't send application/json cross-origin without a
-		// preflight, which we never answer, so web pages can't post here.
-		if ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); ct != "application/json" {
-			http.Error(w, "want application/json", http.StatusUnsupportedMediaType)
+		if !isJSON(w, r) {
 			return
 		}
 		var ev HookEvent
@@ -33,6 +30,18 @@ func NewServer(t *Tracker) http.Handler {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.HandleFunc("POST /flip", func(w http.ResponseWriter, r *http.Request) {
+		if !isJSON(w, r) {
+			return
+		}
+		res, err := d.Flip()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(res)
+	})
 	mux.HandleFunc("GET /state", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		enc := json.NewEncoder(w)
@@ -43,6 +52,17 @@ func NewServer(t *Tracker) http.Handler {
 		})
 	})
 	return loopbackOnly(mux)
+}
+
+// isJSON rejects anything but application/json. Browsers can't send that
+// cross-origin without a preflight, which we never answer, so web pages can't
+// post here.
+func isJSON(w http.ResponseWriter, r *http.Request) bool {
+	if ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); ct != "application/json" {
+		http.Error(w, "want application/json", http.StatusUnsupportedMediaType)
+		return false
+	}
+	return true
 }
 
 // loopbackOnly rejects requests whose Host isn't a loopback address, which

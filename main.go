@@ -1,36 +1,54 @@
 // Command claude-display mirrors Claude Code session status on a WeAct Studio
 // Display FS 0.96" USB screen. Claude Code posts hook events to it over HTTP;
 // it is the only process that writes to the panel.
+//
+//	claude-display [flags]         run the daemon
+//	claude-display [flags] flip    turn the panel 180° and remember it for its USB port
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"image/png"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
 
 func main() {
 	home, _ := os.UserHomeDir()
+	configDir, _ := os.UserConfigDir()
 	var (
 		devicePath  = flag.String("device", "/dev/weact-display", "serial device of the panel")
 		listen      = flag.String("listen", "127.0.0.1:47800", "address Claude Code hooks post to")
-		orientation = flag.Int("orientation", 3, "panel orientation: 2 landscape, 3 landscape rotated 180°")
+		orientFile  = flag.String("config", filepath.Join(configDir, "claude-display", "orientation.json"), "orientation saved per USB port")
+		orientation = flag.Int("orientation", orientLandscapeFlipped, "orientation for a USB port with nothing saved: 2 landscape, 3 landscape rotated 180°")
 		sessionsDir = flag.String("sessions", filepath.Join(home, ".claude", "sessions"), "Claude Code sessions directory")
 		samples     = flag.String("samples", "", "write a PNG of every screen to this directory and exit")
 	)
 	flag.Parse()
 	log.SetFlags(0) // journald adds timestamps
 
+	if flag.Arg(0) == "flip" {
+		if err := flip(*listen); err != nil {
+			fmt.Fprintln(os.Stderr, "claude-display flip:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if !validOrientation(*orientation) {
+		log.Fatalf("-orientation %d: want 2 or 3", *orientation)
+	}
 	if *samples != "" {
 		if err := writeSamples(*samples); err != nil {
 			log.Fatal(err)
@@ -48,7 +66,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	srv := &http.Server{Handler: NewServer(tracker), ReadHeaderTimeout: 5 * time.Second}
+	display := NewDisplay(*devicePath, NewOrientations(*orientFile, byte(*orientation)))
+	srv := &http.Server{Handler: NewServer(tracker, display), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
@@ -56,7 +75,6 @@ func main() {
 	}()
 	log.Printf("listening on http://%s/event", ln.Addr())
 
-	display := NewDisplay(*devicePath, byte(*orientation))
 	displayDone := make(chan struct{})
 	go func() {
 		display.Run(ctx)
@@ -139,5 +157,28 @@ func writeSamples(dir string) error {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
+	return nil
+}
+
+// flip asks the running daemon to turn the panel 180°.
+func flip(listen string) error {
+	resp, err := http.Post("http://"+listen+"/flip", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		return fmt.Errorf("is the claude-display service running? %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return errors.New(strings.TrimSpace(string(body)))
+	}
+	var res FlipResult
+	if err := json.Unmarshal(body, &res); err != nil {
+		return err
+	}
+	if res.SaveError != "" {
+		fmt.Printf("flipped to orientation %d, but couldn't save it for USB port %s: %s\n", res.Orientation, res.Port, res.SaveError)
+		return nil
+	}
+	fmt.Printf("flipped to orientation %d, saved for USB port %s\n", res.Orientation, res.Port)
 	return nil
 }

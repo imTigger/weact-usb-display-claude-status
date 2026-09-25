@@ -58,6 +58,27 @@ commands or file contents.
 Turn the hooks off with `/plugin disable claude-display`, or remove them with
 `make unplugin`. When the daemon stops, the panel goes back to its own screen.
 
+## Left or right side
+
+The panel reads upside down on one side of the laptop. The daemon remembers
+the orientation per USB port, so this only needs doing once per port:
+
+```sh
+claude-display flip    # turn it 180° now, and remember that for this port
+```
+
+Saved in `~/.config/claude-display/orientation.json`, which can also be edited
+by hand (applies on the next replug). Ports are named as the kernel sees
+them, e.g. `1-1` on the laptop or `1-3.2` behind a dock; a new port starts
+with the last orientation chosen.
+
+```json
+{
+  "default": 2,
+  "ports": { "1-1": 3, "1-2": 2 }
+}
+```
+
 ## Debugging
 
 ```sh
@@ -75,7 +96,7 @@ Verified on firmware V1.0.0.2 (see `device.go`):
 - **The `0x05` bitmap header must be its own USB transfer.** Sending it in the
   same write as the pixels makes the firmware drop the frame and keep showing
   its standalone screen.
-- Orientation 3 (landscape rotated 180°) suits this mount; pass `-orientation 2`
-  to flip it.
+- Landscape is orientation 2 or 3 (3 is 2 rotated 180°); see "Left or right
+  side" above.
 - The standalone ("unconnected") orientation and brightness (`0x10`/`0x11`) are
   stored in flash; this project never writes them.
