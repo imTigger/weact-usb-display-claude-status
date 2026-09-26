@@ -100,3 +100,8 @@ Verified on firmware V1.0.0.2 (see `device.go`):
   side" above.
 - The standalone ("unconnected") orientation and brightness (`0x10`/`0x11`) are
   stored in flash; this project never writes them.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The bundled DejaVu fonts in `fonts/` keep their
+own license ([fonts/LICENSE](fonts/LICENSE)).
