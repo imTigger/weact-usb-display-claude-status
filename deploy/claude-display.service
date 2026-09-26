@@ -1,6 +1,6 @@
 [Unit]
 Description=Claude Code status on the WeAct Display FS 0.96" screen
-Documentation=file://%h/WebstormProjects/qinheng-display/README.md
+Documentation=https://github.com/imTigger/weact-usb-display-claude-status
 
 [Service]
 ExecStart=%h/.local/bin/claude-display
