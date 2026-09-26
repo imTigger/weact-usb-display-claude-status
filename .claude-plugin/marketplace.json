@@ -1,6 +1,6 @@
 {
-  "name": "qinheng-display",
-  "description": "Local marketplace for the claude-display status screen",
+  "name": "weact-usb-display-claude-status",
+  "description": "Claude Code session status on a WeAct Studio Display FS 0.96\" USB screen",
   "owner": {
     "name": "Tiger Fok"
   },

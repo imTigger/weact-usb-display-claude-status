@@ -1,17 +1,6 @@
 {
-  "description": "Forward session events to the claude-display daemon (see README). The daemon always answers with an empty 200, so these hooks never make permission decisions.",
+  "description": "Forward session events to the claude-display daemon (see README). The daemon always answers with an empty 200, so these hooks never make permission decisions. No SessionStart: Claude Code doesn't run HTTP hooks for it; new sessions appear from ~/.claude/sessions or their first prompt.",
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "http",
-            "url": "http://127.0.0.1:47800/event",
-            "timeout": 2
-          }
-        ]
-      }
-    ],
     "SessionEnd": [
       {
         "hooks": [

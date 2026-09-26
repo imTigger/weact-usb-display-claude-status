@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image"
 	"image/png"
 	"io"
 	"log"
@@ -34,7 +35,8 @@ func main() {
 		orientFile  = flag.String("config", filepath.Join(configDir, "claude-display", "orientation.json"), "orientation saved per USB port")
 		orientation = flag.Int("orientation", orientLandscapeFlipped, "orientation for a USB port with nothing saved: 2 landscape, 3 landscape rotated 180°")
 		sessionsDir = flag.String("sessions", filepath.Join(home, ".claude", "sessions"), "Claude Code sessions directory")
-		samples     = flag.String("samples", "", "write a PNG of every screen to this directory and exit")
+		samplesDir  = flag.String("samples", "", "write a PNG of every screen to this directory and exit")
+		scale       = flag.Int("scale", 1, "with -samples: enlarge each pixel to a scale×scale block")
 	)
 	flag.Parse()
 	log.SetFlags(0) // journald adds timestamps
@@ -49,8 +51,8 @@ func main() {
 	if !validOrientation(*orientation) {
 		log.Fatalf("-orientation %d: want 2 or 3", *orientation)
 	}
-	if *samples != "" {
-		if err := writeSamples(*samples); err != nil {
+	if *samplesDir != "" {
+		if err := writeSamples(*samplesDir, *scale); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -125,39 +127,59 @@ func renderLoop(ctx context.Context, t *Tracker, d *Display) {
 	}
 }
 
-func writeSamples(dir string) error {
+// samples are the screens rendered by -samples, also used for the README.
+var samples = []struct {
+	name string
+	view View
+}{
+	{"thinking", View{Kind: KindThinking, Big: "Thinking…", Small: "my-app", Corner: "2:14", Detail: "12 tools · 2 agents", Spinner: true, Dots: []Kind{KindReady, KindThinking, KindDone}, Focus: 1}},
+	{"tool", View{Kind: KindTool, Big: "Bash", Small: "my-app", Corner: "0:47", Detail: "3 tools", Spinner: true}},
+	{"tool-long", View{Kind: KindTool, Big: displayTool("mcp__plugin_exa_exa__web_search_exa"), Small: "payments-dashboard-frontend", Corner: "1:02:03", Detail: "148 tools · 5 agents", Spinner: true, Dots: []Kind{KindTool, KindTool, KindNeedsYou, KindReady, KindDone}, Focus: 0}},
+	{"compacting", View{Kind: KindCompacting, Big: "Compacting", Small: "my-app", Corner: "8:40", Detail: "31 tools", Spinner: true}},
+	{"approve", View{Kind: KindNeedsYou, Big: "APPROVE?", Small: "Bash · my-app", Dots: []Kind{KindNeedsYou, KindTool}, Focus: 0}},
+	{"approve-2", View{Kind: KindNeedsYou, Big: "APPROVE?", Small: "api-server", Corner: "2 waiting"}},
+	{"question", View{Kind: KindNeedsYou, Big: "Question", Small: "my-app", Corner: "×2"}},
+	{"done", View{Kind: KindDone, Big: "Done", Small: "my-app", Corner: "4:12", Detail: "23 tools", Dots: []Kind{KindReady, KindTool, KindDone}, Focus: 2}},
+	{"error", View{Kind: KindError, Big: "Error", Small: "my-app", Detail: "rate limit"}},
+	{"ready", View{Kind: KindReady, Big: "Ready", Small: "my-app", Dots: []Kind{KindReady, KindReady}, Focus: 1}},
+	{"clock", View{Kind: KindClock, Big: "21:47", Small: "no sessions"}},
+}
+
+// writeSamples renders every sample screen to dir, each pixel blown up to a
+// scale×scale block so they stay crisp in a README.
+func writeSamples(dir string, scale int) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	dots := []Kind{KindReady, KindTool, KindDone}
-	views := map[string]View{
-		"clock":      {Kind: KindClock, Big: "21:47", Small: "no sessions"},
-		"ready":      {Kind: KindReady, Big: "Ready", Small: "qinheng-display", Dots: []Kind{KindReady, KindReady}, Focus: 1},
-		"thinking":   {Kind: KindThinking, Big: "Thinking…", Small: "qinheng-display", Corner: "2:14", Detail: "12 tools · 2 agents", Spinner: true, Dots: dots, Focus: 1},
-		"tool":       {Kind: KindTool, Big: "Bash", Small: "qinheng-display", Corner: "12:05", Detail: "3 tools", Spinner: true},
-		"tool-long":  {Kind: KindTool, Big: displayTool("mcp__plugin_exa_exa__web_search_exa"), Small: "supplier-portal-frontend", Corner: "1:02:03", Detail: "148 tools · 5 agents", Spinner: true, Dots: []Kind{KindTool, KindTool, KindNeedsYou, KindReady, KindDone}, Focus: 0},
-		"compacting": {Kind: KindCompacting, Big: "Compacting", Small: "qinheng-display", Corner: "8:40", Detail: "31 tools", Spinner: true},
-		"approve":    {Kind: KindNeedsYou, Big: "APPROVE?", Small: "Bash · qinheng-display", Dots: []Kind{KindNeedsYou, KindTool}, Focus: 0},
-		"approve-2":  {Kind: KindNeedsYou, Big: "APPROVE?", Small: "qinheng-display", Corner: "2 waiting"},
-		"question":   {Kind: KindNeedsYou, Big: "Question", Small: "qinheng-display", Corner: "×2"},
-		"done":       {Kind: KindDone, Big: "Done", Small: "qinheng-display", Corner: "4:12", Detail: "23 tools", Dots: dots, Focus: 2},
-		"error":      {Kind: KindError, Big: "Error", Small: "qinheng-display", Detail: "rate limit"},
-	}
-	now := time.Now()
-	for name, v := range views {
-		f, err := os.Create(filepath.Join(dir, name+".png"))
+	now := time.UnixMilli(4 * 120) // a fixed moment, so the spinner shows ✻ and files don't churn
+	for _, s := range samples {
+		f, err := os.Create(filepath.Join(dir, s.name+".png"))
 		if err != nil {
 			return err
 		}
-		err = png.Encode(f, Render(v, now).Img)
+		err = png.Encode(f, scaleUp(Render(s.view, now).Img, scale))
 		if cerr := f.Close(); err == nil {
 			err = cerr
 		}
 		if err != nil {
-			return fmt.Errorf("%s: %w", name, err)
+			return fmt.Errorf("%s: %w", s.name, err)
 		}
 	}
 	return nil
+}
+
+func scaleUp(src *image.RGBA, k int) *image.RGBA {
+	if k <= 1 {
+		return src
+	}
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx()*k, b.Dy()*k))
+	for y := range dst.Rect.Dy() {
+		for x := range dst.Rect.Dx() {
+			dst.SetRGBA(x, y, src.RGBAAt(b.Min.X+x/k, b.Min.Y+y/k))
+		}
+	}
+	return dst
 }
 
 // flip asks the running daemon to turn the panel 180°.

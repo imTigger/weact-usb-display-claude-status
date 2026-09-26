@@ -144,7 +144,7 @@ func (t *Tracker) Apply(ev HookEvent, now time.Time) {
 	fromSubagent := ev.AgentID != ""
 
 	switch ev.Event {
-	case "SessionStart":
+	case "SessionStart": // only via a command hook: Claude Code skips HTTP hooks for it
 		if ev.Source == "compact" {
 			s.set(afterCompact(s.prev), now)
 		} else {

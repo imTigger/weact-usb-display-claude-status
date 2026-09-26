@@ -7,6 +7,27 @@ Shows what Claude Code is doing on a **WeAct Studio Display FS 0.96"** USB scree
 Claude Code sessions ──HTTP hooks──▶ claude-display (systemd user service) ──serial──▶ panel
 ```
 
+<table>
+  <tr>
+    <td align="center"><img src="docs/screens/thinking.png" width="360" alt="Thinking: project, turn time, tool calls, subagents, session squares"><br>Working: turn time, tool calls, subagents, one square per session</td>
+    <td align="center"><img src="docs/screens/tool.png" width="360" alt="Running the Bash tool"><br>Running a tool (name only, never the command)</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screens/approve.png" width="360" alt="APPROVE? for Bash in my-app"><br>Waiting on you: the backlight pulses</td>
+    <td align="center"><img src="docs/screens/approve-2.png" width="360" alt="APPROVE? with 2 waiting"><br>Several prompts: oldest first, with a count</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screens/done.png" width="360" alt="Done after 4:12 with 23 tools"><br>Turn finished</td>
+    <td align="center"><img src="docs/screens/error.png" width="360" alt="Error: rate limit"><br>Turn ended on an API error</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screens/compacting.png" width="360" alt="Compacting"><br>Context compaction</td>
+    <td align="center"><img src="docs/screens/ready.png" width="360" alt="Ready"><br>Idle</td>
+  </tr>
+</table>
+
+Rendered pixel for pixel at 3× by `make screenshots`; the panel itself is 0.96".
+
 The daemon is the only process that writes to the panel. It tracks every open
 session and shows the most urgent one:
 
@@ -24,7 +45,7 @@ Working, Done and Error screens follow Claude Code's spinner line:
 
 ```
 ✻ Thinking…
-qinheng-display        2:14    ← project, turn time
+my-app                 2:14    ← project, turn time
 12 tools · 2 agents   ▪ ▪ ▪    ← this turn's tool calls and running subagents; one square per open session
 ```
 
@@ -51,7 +72,7 @@ commands or file contents.
 2. Daemon: `make install` (builds, installs to `~/.local/bin`, enables the
    `claude-display` user service).
 3. Hooks: `make plugin` (adds this repo as a local plugin marketplace and
-   installs `claude-display@qinheng-display`). Sessions started afterwards
+   installs `claude-display@weact-usb-display-claude-status`). Sessions started afterwards
    report to the daemon; sessions already open are mirrored from
    `~/.claude/sessions` as Thinking/Ready until restarted.
 
@@ -86,6 +107,7 @@ curl -s localhost:47800/state      # what the daemon thinks
 journalctl --user-unit claude-display -f
 scripts/sim.sh                     # walk a fake session through every screen
 make samples                       # render every screen to samples/*.png
+make screenshots                   # refresh the README images in docs/screens
 ```
 
 ## Panel protocol notes

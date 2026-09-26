@@ -1,7 +1,7 @@
 PREFIX  ?= $(HOME)/.local
 UNITDIR ?= $(HOME)/.config/systemd/user
 
-.PHONY: build test install uninstall plugin unplugin samples
+.PHONY: build test install uninstall plugin unplugin samples screenshots
 
 build:
 	go build -o bin/claude-display .
@@ -26,11 +26,15 @@ uninstall:
 # Claude Code reads the plugin in place, so hook edits apply to new sessions.
 plugin:
 	claude plugin marketplace add $(CURDIR)
-	claude plugin install claude-display@qinheng-display
+	claude plugin install claude-display@weact-usb-display-claude-status
 
 unplugin:
-	claude plugin marketplace remove qinheng-display
+	claude plugin marketplace remove weact-usb-display-claude-status
 
 # Render every screen to PNG for layout review without the panel.
 samples: build
 	bin/claude-display -samples samples
+
+# The README gallery: every screen at 3x, pixel for pixel.
+screenshots: build
+	bin/claude-display -samples docs/screens -scale 3
