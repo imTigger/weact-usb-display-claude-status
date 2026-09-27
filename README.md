@@ -61,8 +61,7 @@ commands or file contents.
 
 ## Setup
 
-1. udev rule, so ModemManager leaves the panel alone and it gets a stable name
-   (needs sudo):
+1. udev rule, so ModemManager doesn't probe the panels as modems (needs sudo):
 
    ```sh
    sudo install -m644 deploy/70-weact-display.rules /etc/udev/rules.d/
@@ -79,14 +78,24 @@ commands or file contents.
 Turn the hooks off with `/plugin disable claude-display`, or remove them with
 `make unplugin`. When the daemon stops, the panel goes back to its own screen.
 
+## Several panels
+
+Every connected panel shows the same status, each the right way up for its
+USB port. Panels are found by their per-serial names in `/dev/serial/by-id/`,
+so they can be plugged in and out in any order.
+
 ## Left or right side
 
 The panel reads upside down on one side of the laptop. The daemon remembers
 the orientation per USB port, so this only needs doing once per port:
 
 ```sh
-claude-display flip    # turn it 180° now, and remember that for this port
+claude-display flip        # turn it 180° now, and remember that for this port
+claude-display flip 1-2    # with several panels: the one on USB port 1-2
 ```
+
+With several panels, `claude-display flip` alone lists their ports, as does
+`curl -s localhost:47800/state`.
 
 Saved in `~/.config/claude-display/orientation.json`, which can also be edited
 by hand (applies on the next replug). Ports are named as the kernel sees

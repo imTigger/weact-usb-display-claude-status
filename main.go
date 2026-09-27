@@ -2,11 +2,12 @@
 // Display FS 0.96" USB screen. Claude Code posts hook events to it over HTTP;
 // it is the only process that writes to the panel.
 //
-//	claude-display [flags]         run the daemon
-//	claude-display [flags] flip    turn the panel 180° and remember it for its USB port
+//	claude-display [flags]              run the daemon
+//	claude-display [flags] flip [port]  turn a panel 180° and remember it for its USB port
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,7 +31,7 @@ func main() {
 	home, _ := os.UserHomeDir()
 	configDir, _ := os.UserConfigDir()
 	var (
-		devicePath  = flag.String("device", "/dev/weact-display", "serial device of the panel")
+		panels      = flag.String("panels", defaultPanels, "glob matching every panel's serial device; all of them mirror the status")
 		listen      = flag.String("listen", "127.0.0.1:47800", "address Claude Code hooks post to")
 		orientFile  = flag.String("config", filepath.Join(configDir, "claude-display", "orientation.json"), "orientation saved per USB port")
 		orientation = flag.Int("orientation", orientLandscapeFlipped, "orientation for a USB port with nothing saved: 2 landscape, 3 landscape rotated 180°")
@@ -42,7 +43,7 @@ func main() {
 	log.SetFlags(0) // journald adds timestamps
 
 	if flag.Arg(0) == "flip" {
-		if err := flip(*listen); err != nil {
+		if err := flip(*listen, flag.Arg(1)); err != nil {
 			fmt.Fprintln(os.Stderr, "claude-display flip:", err)
 			os.Exit(1)
 		}
@@ -68,8 +69,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	display := NewDisplay(*devicePath, NewOrientations(*orientFile, byte(*orientation)))
-	srv := &http.Server{Handler: NewServer(tracker, display), ReadHeaderTimeout: 5 * time.Second}
+	mirror := NewMirror(*panels, NewOrientations(*orientFile, byte(*orientation)))
+	srv := &http.Server{Handler: NewServer(tracker, mirror), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
@@ -79,7 +80,7 @@ func main() {
 
 	displayDone := make(chan struct{})
 	go func() {
-		display.Run(ctx)
+		mirror.Run(ctx)
 		close(displayDone)
 	}()
 
@@ -96,12 +97,12 @@ func main() {
 		}
 	}()
 
-	renderLoop(ctx, tracker, display)
+	renderLoop(ctx, tracker, mirror)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
-	select { // let the panel go back to its own screen
+	select { // let the panels go back to their own screens
 	case <-displayDone:
 	case <-time.After(3 * time.Second):
 	}
@@ -109,7 +110,7 @@ func main() {
 
 // renderLoop redraws on every state change, and on a timer for the spinner
 // and the seconds counter. The display only sends pixels that changed.
-func renderLoop(ctx context.Context, t *Tracker, d *Display) {
+func renderLoop(ctx context.Context, t *Tracker, d *Mirror) {
 	for {
 		now := time.Now()
 		v := t.View(now)
@@ -182,19 +183,21 @@ func scaleUp(src *image.RGBA, k int) *image.RGBA {
 	return dst
 }
 
-// flip asks the running daemon to turn the panel 180°.
-func flip(listen string) error {
-	resp, err := http.Post("http://"+listen+"/flip", "application/json", strings.NewReader("{}"))
+// flip asks the running daemon to turn a panel 180°: the one on port, or the
+// only one connected.
+func flip(listen, port string) error {
+	body, _ := json.Marshal(map[string]string{"port": port})
+	resp, err := http.Post("http://"+listen+"/flip", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("is the claude-display service running? %w", err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	answer, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return errors.New(strings.TrimSpace(string(body)))
+		return errors.New(strings.TrimSpace(string(answer)))
 	}
 	var res FlipResult
-	if err := json.Unmarshal(body, &res); err != nil {
+	if err := json.Unmarshal(answer, &res); err != nil {
 		return err
 	}
 	if res.SaveError != "" {

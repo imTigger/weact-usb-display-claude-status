@@ -99,7 +99,7 @@ func (o *Orientations) Set(port string, orientation byte) error {
 // usbPort names the physical USB port the serial device at devPath hangs off:
 // "1-2" for a port on the laptop, "1-3.2" behind a hub or dock.
 func usbPort(devPath, sysClassTTY string) (string, error) {
-	tty, err := filepath.EvalSymlinks(devPath) // /dev/weact-display -> /dev/ttyACM1
+	tty, err := filepath.EvalSymlinks(devPath) // /dev/serial/by-id/usb-WeAct_…-if00 -> /dev/ttyACM1
 	if err != nil {
 		return "", err
 	}

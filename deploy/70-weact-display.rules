@@ -1,1 +1,1 @@
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="fe0c", ATTRS{serial}=="[aA][dD]*", ENV{ID_MM_DEVICE_IGNORE}="1", SYMLINK+="weact-display"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="fe0c", ATTRS{serial}=="[aA][dD]*", ENV{ID_MM_DEVICE_IGNORE}="1"

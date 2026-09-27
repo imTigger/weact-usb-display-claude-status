@@ -9,12 +9,13 @@ import (
 	"time"
 )
 
-// NewServer takes Claude Code HTTP hooks on POST /event, turns the panel on
-// POST /flip, and serves a debug dump on GET /state.
+// NewServer takes Claude Code HTTP hooks on POST /event, turns a panel on
+// POST /flip ({"port": "1-2"}, or {} with one panel), and serves a debug dump
+// on GET /state.
 //
 // Every /event answer is 200 with an empty body, which hooks treat as "no
 // decision": this server must never approve or deny a PermissionRequest.
-func NewServer(t *Tracker, d *Display) http.Handler {
+func NewServer(t *Tracker, m *Mirror) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /event", func(w http.ResponseWriter, r *http.Request) {
 		if !isJSON(w, r) {
@@ -34,7 +35,14 @@ func NewServer(t *Tracker, d *Display) http.Handler {
 		if !isJSON(w, r) {
 			return
 		}
-		res, err := d.Flip()
+		var req struct {
+			Port string `json:"port"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		res, err := m.Flip(req.Port)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
@@ -49,6 +57,7 @@ func NewServer(t *Tracker, d *Display) http.Handler {
 		_ = enc.Encode(map[string]any{
 			"view":     t.View(time.Now()),
 			"sessions": t.Snapshot(),
+			"panels":   m.Panels(),
 		})
 	})
 	return loopbackOnly(mux)

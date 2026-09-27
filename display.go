@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
@@ -25,18 +28,57 @@ const (
 	breatheLow    = 40
 )
 
-// Display owns the device: it reconnects whenever the panel goes away, sends
-// only the pixels that changed, and always shows the most recent frame.
+// Display owns one panel: it sends only the pixels that changed and always
+// shows the most recent frame. Mirror runs one per connected panel.
 type Display struct {
-	path      string
-	orients   *Orientations
-	frames    chan Frame
-	flips     chan chan flipReply
-	connected atomic.Bool
+	path    string
+	name    string // the panel's serial, for logs
+	orients *Orientations
+	frames  chan Frame
+	flips   chan chan flipReply
+
+	mu   sync.Mutex
+	info PanelInfo
+}
+
+// PanelInfo is what /state and flip report about a panel.
+type PanelInfo struct {
+	Serial      string `json:"serial"`
+	Port        string `json:"port"`
+	Orientation byte   `json:"orientation"`
+	Connected   bool   `json:"connected"`
 }
 
 func NewDisplay(path string, orients *Orientations) *Display {
-	return &Display{path: path, orients: orients, frames: make(chan Frame, 1), flips: make(chan chan flipReply)}
+	name := panelName(path)
+	return &Display{
+		path: path, name: name, orients: orients,
+		frames: make(chan Frame, 1), flips: make(chan chan flipReply),
+		info: PanelInfo{Serial: name},
+	}
+}
+
+// byIDSerial finds the serial in a udev by-id name such as
+// usb-WeAct_Studio_Display_FS_0.96_Inch_adde166c3c5e-if00.
+var byIDSerial = regexp.MustCompile(`_([0-9A-Za-z]+)-if[0-9]+$`)
+
+func panelName(path string) string {
+	if m := byIDSerial.FindStringSubmatch(filepath.Base(path)); m != nil {
+		return m[1]
+	}
+	return filepath.Base(path)
+}
+
+func (d *Display) Info() PanelInfo {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.info
+}
+
+func (d *Display) setInfo(port string, orient byte, connected bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.info.Port, d.info.Orientation, d.info.Connected = port, orient, connected
 }
 
 // FlipResult reports a 180° turn: the port the panel is on and the
@@ -57,7 +99,7 @@ var errNotConnected = errors.New("display not connected")
 // Flip turns the panel 180° and remembers that for the USB port it's on. It
 // returns an error only when the panel wasn't turned.
 func (d *Display) Flip() (FlipResult, error) {
-	if !d.connected.Load() {
+	if !d.Info().Connected {
 		return FlipResult{}, errNotConnected
 	}
 	reply := make(chan flipReply, 1)
@@ -90,7 +132,7 @@ func (d *Display) Show(f Frame) {
 }
 
 // Run drives the panel until ctx is cancelled, then hands it back to its
-// standalone screen.
+// standalone screen. It returns early once the panel is unplugged.
 func (d *Display) Run(ctx context.Context) {
 	var latest Frame
 	lastErr := ""
@@ -99,11 +141,15 @@ func (d *Display) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if _, statErr := os.Stat(d.path); statErr != nil {
+			log.Printf("panel %s: unplugged", d.name)
+			return
+		}
 		if connected {
 			lastErr = ""
 		}
-		if msg := err.Error(); msg != lastErr { // don't repeat "no such file" every retry
-			log.Printf("display: %v", err)
+		if msg := err.Error(); msg != lastErr { // don't repeat the same error every retry
+			log.Printf("panel %s: %v", d.name, err)
 			lastErr = msg
 		}
 		// Also outlasts the device's 500 ms timeout for a half-received bitmap.
@@ -141,15 +187,15 @@ func (d *Display) session(ctx context.Context, latest *Frame) (connected bool, e
 	}
 	port, err := usbPort(d.path, "/sys/class/tty")
 	if err != nil {
-		log.Printf("display: can't tell which USB port it's on: %v", err)
+		log.Printf("panel %s: can't tell which USB port it's on: %v", d.name, err)
 	}
 	orient := d.orients.For(port)
 	if err := dev.SetOrientation(orient); err != nil {
 		return false, err
 	}
-	log.Printf("display: connected to %s %s on %s, USB port %s, orientation %d", who, version, d.path, port, orient)
-	d.connected.Store(true)
-	defer d.connected.Store(false)
+	log.Printf("panel %s: connected, %s %s, USB port %s, orientation %d", d.name, who, version, port, orient)
+	d.setInfo(port, orient, true)
+	defer func() { d.setInfo(port, orient, false) }()
 
 	p := painter{dev: dev, brightness: -1}
 	if latest.Img != nil {
@@ -185,6 +231,7 @@ func (d *Display) session(ctx context.Context, latest *Frame) (connected bool, e
 				return true, err
 			}
 			orient = o
+			d.setInfo(port, orient, true)
 			res := FlipResult{Port: port, Orientation: o}
 			if err := d.orients.Set(port, o); err != nil {
 				log.Printf("orientation: can't save: %v", err)
