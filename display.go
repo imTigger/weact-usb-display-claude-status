@@ -157,7 +157,7 @@ func (d *Display) session(ctx context.Context, latest *Frame) (connected bool, e
 			return true, err
 		}
 	}
-	tick := time.NewTicker(breathePeriod)
+	tick := time.NewTicker(breathePeriod) // also paces the unplug check
 	defer tick.Stop()
 	for {
 		select {
@@ -172,6 +172,9 @@ func (d *Display) session(ctx context.Context, latest *Frame) (connected bool, e
 				return true, err
 			}
 		case <-tick.C:
+			if !dev.Current(d.path) {
+				return true, errors.New("panel unplugged")
+			}
 			if err := p.breathe(); err != nil {
 				return true, err
 			}

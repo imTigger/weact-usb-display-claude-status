@@ -46,6 +46,19 @@ func OpenDevice(path string) (*Device, error) {
 
 func (d *Device) Close() error { return d.f.Close() }
 
+// Current reports whether path still names the device open here. After an
+// unplug the kernel keeps our file descriptor alive but gives the replugged
+// panel a new tty node, and nothing fails until the next write, which on an
+// idle screen can be a long time coming.
+func (d *Device) Current(path string) bool {
+	open, err := d.f.Stat()
+	if err != nil {
+		return false
+	}
+	now, err := os.Stat(path)
+	return err == nil && os.SameFile(open, now)
+}
+
 // control runs fn on the raw fd without f.Fd(), which would switch the file to
 // blocking mode and disable deadlines.
 func (d *Device) control(fn func(fd int) error) error {
