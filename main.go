@@ -36,6 +36,7 @@ func main() {
 		orientFile  = flag.String("config", filepath.Join(configDir, "claude-display", "orientation.json"), "orientation saved per USB port")
 		orientation = flag.Int("orientation", orientLandscapeFlipped, "orientation for a USB port with nothing saved: 2 landscape, 3 landscape rotated 180°")
 		sessionsDir = flag.String("sessions", filepath.Join(home, ".claude", "sessions"), "Claude Code sessions directory")
+		projectsDir = flag.String("projects", filepath.Join(home, ".claude", "projects"), "Claude Code transcripts directory, for session titles")
 		samplesDir  = flag.String("samples", "", "write a PNG of every screen to this directory and exit")
 		scale       = flag.Int("scale", 1, "with -samples: enlarge each pixel to a scale×scale block")
 	)
@@ -64,6 +65,8 @@ func main() {
 
 	tracker := NewTracker(time.Now())
 	tracker.Reconcile(ReadLiveSessions(*sessionsDir), time.Now())
+	titles := NewTitles()
+	refreshTitles(tracker, titles, *projectsDir)
 
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -93,6 +96,7 @@ func main() {
 				return
 			case <-tick.C:
 				tracker.Reconcile(ReadLiveSessions(*sessionsDir), time.Now())
+				refreshTitles(tracker, titles, *projectsDir)
 			}
 		}
 	}()
@@ -133,16 +137,18 @@ var samples = []struct {
 	name string
 	view View
 }{
-	{"thinking", View{Kind: KindThinking, Big: "Thinking…", Small: "my-app", Corner: "2:14", Detail: "12 tools · 2 agents", Spinner: true, Dots: []Kind{KindReady, KindThinking, KindDone}, Focus: 1}},
-	{"tool", View{Kind: KindTool, Big: "Bash", Small: "my-app", Corner: "0:47", Detail: "3 tools", Spinner: true}},
+	{"thinking", View{Kind: KindThinking, Big: "Thinking…", Small: "my-app", Title: "Fix login redirect loop", Corner: "2:14", Detail: "12 tools · 2 agents", Spinner: true, Dots: []Kind{KindReady, KindThinking, KindDone}, Focus: 1}},
+	{"thinking-untitled", View{Kind: KindThinking, Big: "Thinking…", Small: "my-app", Corner: "0:03", Spinner: true}},
+	{"tool", View{Kind: KindTool, Big: "Bash", Small: "my-app", Title: "Add CSV export to the orders page", Corner: "0:47", Detail: "3 tools", Spinner: true}},
 	{"tool-long", View{Kind: KindTool, Big: displayTool("mcp__plugin_exa_exa__web_search_exa"), Small: "payments-dashboard-frontend", Corner: "1:02:03", Detail: "148 tools · 5 agents", Spinner: true, Dots: []Kind{KindTool, KindTool, KindNeedsYou, KindReady, KindDone}, Focus: 0}},
-	{"compacting", View{Kind: KindCompacting, Big: "Compacting", Small: "my-app", Corner: "8:40", Detail: "31 tools", Spinner: true}},
-	{"approve", View{Kind: KindNeedsYou, Big: "APPROVE?", Small: "Bash · my-app", Dots: []Kind{KindNeedsYou, KindTool}, Focus: 0}},
-	{"approve-2", View{Kind: KindNeedsYou, Big: "APPROVE?", Small: "api-server", Corner: "2 waiting"}},
-	{"question", View{Kind: KindNeedsYou, Big: "Question", Small: "my-app", Corner: "×2"}},
-	{"done", View{Kind: KindDone, Big: "Done", Small: "my-app", Corner: "4:12", Detail: "23 tools", Dots: []Kind{KindReady, KindTool, KindDone}, Focus: 2}},
-	{"error", View{Kind: KindError, Big: "Error", Small: "my-app", Detail: "rate limit"}},
-	{"ready", View{Kind: KindReady, Big: "Ready", Small: "my-app", Dots: []Kind{KindReady, KindReady}, Focus: 1}},
+	{"compacting", View{Kind: KindCompacting, Big: "Compacting", Small: "my-app", Title: "Migrate billing to Stripe", Corner: "8:40", Detail: "31 tools", Spinner: true}},
+	{"approve", View{Kind: KindNeedsYou, Big: "APPROVE?", Small: "Bash · my-app", Title: "Fix login redirect loop", Dots: []Kind{KindNeedsYou, KindTool}, Focus: 0}},
+	{"approve-untitled", View{Kind: KindNeedsYou, Big: "APPROVE?", Small: "Bash · my-app", Dots: []Kind{KindNeedsYou, KindTool}, Focus: 0}},
+	{"approve-2", View{Kind: KindNeedsYou, Big: "APPROVE?", Small: "api-server", Title: "Rate-limit the public API", Corner: "2 waiting"}},
+	{"question", View{Kind: KindNeedsYou, Big: "Question", Small: "my-app", Title: "Plan the v2 data model", Corner: "×2"}},
+	{"done", View{Kind: KindDone, Big: "Done", Small: "my-app", Title: "Fix login redirect loop", Corner: "4:12", Detail: "23 tools", Dots: []Kind{KindReady, KindTool, KindDone}, Focus: 2}},
+	{"error", View{Kind: KindError, Big: "Error", Small: "my-app", Title: "Upgrade to React 19", Detail: "rate limit"}},
+	{"ready", View{Kind: KindReady, Big: "Ready", Small: "my-app", Title: "Fix login redirect loop", Dots: []Kind{KindReady, KindReady}, Focus: 1}},
 	{"clock", View{Kind: KindClock, Big: "21:47", Small: "no sessions"}},
 }
 
@@ -181,6 +187,23 @@ func scaleUp(src *image.RGBA, k int) *image.RGBA {
 		}
 	}
 	return dst
+}
+
+// refreshTitles reads each session's title from its transcript: the path its
+// hooks gave, or found by session ID for sessions without hooks.
+func refreshTitles(t *Tracker, titles *Titles, projectsDir string) {
+	keep := map[string]bool{}
+	for id, path := range t.Transcripts() {
+		if path == "" || !underDir(path, projectsDir) {
+			path = findTranscript(projectsDir, id)
+		}
+		if path == "" {
+			continue
+		}
+		keep[path] = true
+		t.SetTitle(id, path, titles.Title(path))
+	}
+	titles.Forget(keep)
 }
 
 // flip asks the running daemon to turn a panel 180°: the one on port, or the

@@ -46,8 +46,14 @@ Working, Done and Error screens follow Claude Code's spinner line:
 ```
 ✻ Thinking…
 my-app                 2:14    ← project, turn time
+Fix login redirect loop        ← session title, so sessions in one directory stay apart
 12 tools · 2 agents   ▪ ▪ ▪    ← this turn's tool calls and running subagents; one square per open session
 ```
+
+The session title is the one Claude Code shows for the session: its
+automatic title, or yours after `/rename`, read from the session's transcript.
+A brand-new session has none yet and shows the other three lines only. The
+big-word screens (APPROVE?, Ready, …) show the title under the project too.
 
 Each square is an open session in the order they started, coloured by its
 state; the one on screen is underlined.

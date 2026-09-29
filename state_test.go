@@ -327,3 +327,22 @@ func TestFocus(t *testing.T) {
 		t.Fatalf("after a ends: got %+v, want a working session", v)
 	}
 }
+
+func TestTitleReachesTheScreen(t *testing.T) {
+	tr, now := replay(t, ev("UserPromptSubmit"))
+	ev := HookEvent{Event: "PreToolUse", SessionID: "a", ToolName: "Bash", TranscriptPath: "/p/a.jsonl"}
+	tr.Apply(ev, now)
+	if got := tr.Transcripts()["a"]; got != "/p/a.jsonl" {
+		t.Fatalf("transcript = %q, want the hook's path", got)
+	}
+	<-tr.Changed() // drain
+	tr.SetTitle("a", "/p/a.jsonl", "KECTASK-0883 merge status")
+	select {
+	case <-tr.Changed():
+	default:
+		t.Fatal("a new title should redraw")
+	}
+	if v := tr.View(now); v.Title != "KECTASK-0883 merge status" || v.Small != "proj-a" {
+		t.Fatalf("got %+v, want the title under proj-a", v)
+	}
+}

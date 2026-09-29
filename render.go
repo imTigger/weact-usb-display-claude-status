@@ -43,6 +43,7 @@ type View struct {
 	Big     string // headline
 	Small   string // project, or "tool · project"
 	Corner  string // turn time or badges
+	Title   string // session title, under the project; "" to leave the line out
 	Detail  string // status layout only: turn activity or error
 	Spinner bool
 	Dots    []Kind // every open session in a stable order, when there are several
@@ -152,15 +153,31 @@ func Render(v View, now time.Time) Frame {
 }
 
 const (
-	iconBox   = 20
-	dotSize   = 8
-	dotGap    = 3
-	baseline1 = 24 // status layout rows
-	baseline2 = 48
-	baseline3 = 72
+	iconBox = 20
+	dotSize = 8
+	dotGap  = 3
+)
+
+// statusRows places the status layout's lines: baselines and font sizes.
+type statusRows struct {
+	head, project, title, detail                           int // baselines
+	headSize, iconSize, projectSize, titleSize, detailSize int
+}
+
+var (
+	threeRows = statusRows{head: 24, project: 48, detail: 72,
+		headSize: 22, iconSize: 17, projectSize: 17, detailSize: 15}
+	// With a session title, everything moves up a little to make room for it
+	// under the project.
+	fourRows = statusRows{head: 21, project: 39, title: 56, detail: 74,
+		headSize: 20, iconSize: 16, projectSize: 15, titleSize: 14, detailSize: 14}
 )
 
 func renderStatus(img *image.RGBA, v View, fg color.RGBA, now time.Time) {
+	rows := threeRows
+	if v.Title != "" {
+		rows = fourRows
+	}
 	icon := "✔"
 	switch {
 	case v.Spinner:
@@ -168,38 +185,45 @@ func renderStatus(img *image.RGBA, v View, fg color.RGBA, now time.Time) {
 	case v.Kind == KindError:
 		icon = "✖"
 	}
-	sf := face(symbolFont, 17)
-	drawAt(img, sf, pad+(iconBox-textWidth(sf, icon))/2, baseline1-2, icon, fg)
+	sf := face(symbolFont, rows.iconSize)
+	drawAt(img, sf, pad+(iconBox-textWidth(sf, icon))/2, rows.head-2, icon, fg)
 	left := pad + iconBox + 2
-	hf, head := fit(boldFont, v.Big, 22, 14, screenW-pad-left) // the headline gets the whole row
-	drawAt(img, hf, left, baseline1, head, fg)
+	hf, head := fit(boldFont, v.Big, rows.headSize, 13, screenW-pad-left) // the headline gets the whole row
+	drawAt(img, hf, left, rows.head, head, fg)
 
 	right := screenW - pad
 	if v.Corner != "" {
-		cf := face(regularFont, 17)
+		cf := face(regularFont, rows.projectSize)
 		cw := textWidth(cf, v.Corner)
 		// Digits have no descenders, so on the project's baseline they look
 		// raised next to "qinheng-display"; drop them to line up by eye.
-		drawAt(img, cf, right-cw, baseline2+2, v.Corner, fg)
+		drawAt(img, cf, right-cw, rows.project+2, v.Corner, fg)
 		right -= cw + pad
 	}
-	pf, project := fit(regularFont, v.Small, 17, 13, right-pad)
-	drawAt(img, pf, pad, baseline2, project, fg)
+	pf, project := fit(regularFont, v.Small, rows.projectSize, 12, right-pad)
+	drawAt(img, pf, pad, rows.project, project, fg)
+
+	if v.Title != "" {
+		tf, title := fit(regularFont, v.Title, rows.titleSize, 11, screenW-2*pad)
+		drawAt(img, tf, pad, rows.title, title, fg)
+	}
 
 	right = screenW - pad
 	if len(v.Dots) > 0 {
-		right = drawDots(img, v, fg, right, baseline3-dotSize-1) - pad
+		right = drawDots(img, v, fg, right, rows.detail-dotSize-1) - pad
 	}
-	df, detail := fit(regularFont, v.Detail, 15, 12, right-pad)
-	drawAt(img, df, pad, baseline3, detail, fg)
+	df, detail := fit(regularFont, v.Detail, rows.detailSize, 11, right-pad)
+	drawAt(img, df, pad, rows.detail, detail, fg)
 }
 
 func renderBig(img *image.RGBA, v View, fg color.RGBA) {
-	const bigMax, bigMin = 34, 16
-	bf, big := fit(boldFont, v.Big, bigMax, bigMin, screenW-2*pad)
+	bigMax, small := 34, screenH-7 // big word size, baseline of the project line
+	if v.Title != "" {
+		bigMax, small = 28, 55 // make room for the title under the project
+	}
+	bf, big := fit(boldFont, v.Big, bigMax, 16, screenW-2*pad)
 	drawAt(img, bf, pad, 4+face(boldFont, bigMax).Metrics().Ascent.Ceil(), big, fg)
 
-	const small = screenH - 7 // baseline of the bottom line
 	right := screenW - pad
 	if len(v.Dots) > 0 {
 		right = drawDots(img, v, fg, right, small-dotSize-1) - pad
@@ -212,6 +236,11 @@ func renderBig(img *image.RGBA, v View, fg color.RGBA) {
 	}
 	sf, text := fit(regularFont, v.Small, 16, 12, right-pad)
 	drawAt(img, sf, pad, small, text, fg)
+
+	if v.Title != "" {
+		tf, title := fit(regularFont, v.Title, 14, 11, screenW-2*pad)
+		drawAt(img, tf, pad, screenH-5, title, fg)
+	}
 }
 
 // drawDots draws one square per session, filled with that session's colour,

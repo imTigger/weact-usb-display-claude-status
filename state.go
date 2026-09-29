@@ -61,24 +61,27 @@ type HookEvent struct {
 	NotificationType string `json:"notification_type"`
 	Error            string `json:"error"`
 	Source           string `json:"source"`
+	TranscriptPath   string `json:"transcript_path"`
 }
 
 type Session struct {
-	ID        string
-	Project   string
-	Phase     Phase
-	Tool      string
-	Ask       string // big word while waiting on you
-	Err       string
-	TurnStart time.Time
-	TurnTime  time.Duration // length of the last finished turn
-	Tools     int           // tool calls this turn, subagents' included
-	Started   time.Time
-	Since     time.Time // when Phase was entered
-	LastEvent time.Time
-	Subagents int
-	hooked    bool  // got hook events; otherwise only mirrored from ~/.claude/sessions
-	prev      Phase // restored after compaction
+	ID         string
+	Project    string
+	Phase      Phase
+	Tool       string
+	Ask        string // big word while waiting on you
+	Err        string
+	TurnStart  time.Time
+	TurnTime   time.Duration // length of the last finished turn
+	Tools      int           // tool calls this turn, subagents' included
+	Started    time.Time
+	Title      string // "KECTASK-0883 merge status": tells apart sessions in one directory
+	Transcript string
+	Since      time.Time // when Phase was entered
+	LastEvent  time.Time
+	Subagents  int
+	hooked     bool  // got hook events; otherwise only mirrored from ~/.claude/sessions
+	prev       Phase // restored after compaction
 }
 
 func (s *Session) set(p Phase, now time.Time) {
@@ -141,6 +144,9 @@ func (t *Tracker) Apply(ev HookEvent, now time.Time) {
 	}
 	s := t.session(ev.SessionID, ev.Cwd, now)
 	s.LastEvent, s.hooked = now, true
+	if ev.TranscriptPath != "" && s.Transcript == "" {
+		s.Transcript = ev.TranscriptPath
+	}
 	fromSubagent := ev.AgentID != ""
 
 	switch ev.Event {
@@ -321,7 +327,7 @@ func (t *Tracker) View(now time.Time) View {
 	focus := t.pickFocus(list)
 	s := list[focus]
 	t.focusID = s.ID
-	v := View{Small: s.Project, Focus: focus}
+	v := View{Small: s.Project, Title: s.Title, Focus: focus}
 	waiting := 0
 	if len(list) > 1 {
 		for _, o := range list {
@@ -435,6 +441,32 @@ func (p Phase) kind() Kind {
 		return KindError
 	default:
 		return KindReady
+	}
+}
+
+// Transcripts lists every session's transcript path, "" where not yet known.
+func (t *Tracker) Transcripts() map[string]string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make(map[string]string, len(t.sessions))
+	for id, s := range t.sessions {
+		out[id] = s.Transcript
+	}
+	return out
+}
+
+// SetTitle records a session's transcript path and the title read from it.
+func (t *Tracker) SetTitle(id, transcript, title string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s := t.sessions[id]
+	if s == nil {
+		return
+	}
+	s.Transcript = transcript
+	if s.Title != title {
+		s.Title = title
+		t.notify()
 	}
 }
 
